@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pitch Lab — Vocal Pitch Monitor</title>
+<meta name="description" content="A live vocal pitch monitor. Sing into the mic and watch your pitch trace in real time." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="app">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">◉</span>
+        <h1>PITCH<span class="accent">LAB</span></h1>
+      </div>
+      <p class="tagline">vocal pitch monitor — module 01 / live mic tracker</p>
+    </header>
+
+    <main class="rack">
+      <section class="panel panel-scope">
+        <div class="panel-label">PITCH MONITOR</div>
+        <canvas id="pitchCanvas"></canvas>
+        <div class="scope-footer">
+          <span id="statusText" class="status">STANDBY</span>
+          <span id="errorText" class="error-text" role="alert"></span>
+        </div>
+      </section>
+
+      <aside class="side-rack">
+        <section class="panel panel-readout">
+          <div class="panel-label">NOTE</div>
+          <div class="readout">
+            <span id="noteName">—</span>
+          </div>
+          <div class="sub-readout">
+            <span id="freqValue">— Hz</span>
+            <span id="centsValue">— ¢</span>
+          </div>
+        </section>
+
+        <section class="panel panel-input">
+          <div class="panel-label">MIC INPUT</div>
+          <div class="meter" aria-hidden="true">
+            <div id="meterFill" class="meter-fill"></div>
+          </div>
+          <button id="toggleBtn" class="btn-toggle" type="button">START</button>
+          <p class="hint">press <kbd>SPACE</kbd> to start / stop</p>
+        </section>
+
+        <section class="panel panel-log">
+          <div class="panel-label">SESSION LOG</div>
+          <ul id="sessionLog" class="log-list">
+            <li class="log-empty">No sessions yet</li>
+          </ul>
+          <button id="clearLogBtn" class="btn-text" type="button">clear log</button>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="app-footer">
+      <p>Phase 1 — Live Mic Pitch Tracker · requires microphone access (HTTPS or localhost)</p>
+    </footer>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
