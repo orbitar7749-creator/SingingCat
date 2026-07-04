@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SingingCat — Vocal Pitch Monitor</title>
-<meta name="description" content="A live vocal pitch monitor. Sing into the mic and watch your pitch trace in real time." />
+<title>Singing Cat — Vocal Pitch Monitor</title>
+<meta name="description" content="Singing Cat — a live vocal pitch monitor. Sing into the mic and watch your pitch trace in real time." />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -16,13 +16,34 @@
   <div class="app">
     <header class="app-header">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">◉</span>
-        <h1>PITCH<span class="accent">LAB</span></h1>
+        <span class="brand-mark" aria-hidden="true">🐱</span>
+        <h1>SINGING<span class="accent">CAT</span></h1>
       </div>
       <p class="tagline">vocal pitch monitor — module 01 / live mic tracker</p>
     </header>
 
     <main class="rack">
+      <section class="panel panel-player">
+        <div class="panel-label">PLAYER</div>
+        <audio id="audioPlayer" preload="metadata" style="display:none"></audio>
+        <div class="player-toolbar">
+          <label class="btn-toggle file-btn" for="songFile">LOAD SONG</label>
+          <input type="file" id="songFile" accept="audio/*" hidden />
+          <span id="songTitle" class="song-title">No song loaded</span>
+        </div>
+        <canvas id="waveformCanvas"></canvas>
+        <div class="player-controls">
+          <button id="playBtn" class="btn-toggle" type="button" disabled>PLAY</button>
+          <input type="range" id="seekBar" class="seek-bar" min="0" max="100" value="0" step="0.1" disabled />
+          <span id="timeDisplay" class="time-display">0:00 / 0:00</span>
+        </div>
+        <div class="speed-control">
+          <label for="speedRange">SPEED</label>
+          <input type="range" id="speedRange" min="0.5" max="1.5" step="0.05" value="1" disabled />
+          <span id="speedValue">1.00x</span>
+        </div>
+      </section>
+
       <section class="panel panel-scope">
         <div class="panel-label">PITCH MONITOR</div>
         <canvas id="pitchCanvas"></canvas>
