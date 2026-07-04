@@ -18,9 +18,23 @@ const els = {
   toggleBtn: document.getElementById('toggleBtn'),
   sessionLog: document.getElementById('sessionLog'),
   clearLogBtn: document.getElementById('clearLogBtn'),
+  audioPlayer: document.getElementById('audioPlayer'),
+  songFile: document.getElementById('songFile'),
+  songTitle: document.getElementById('songTitle'),
+  waveformCanvas: document.getElementById('waveformCanvas'),
+  playBtn: document.getElementById('playBtn'),
+  seekBar: document.getElementById('seekBar'),
+  timeDisplay: document.getElementById('timeDisplay'),
+  speedRange: document.getElementById('speedRange'),
+  speedValue: document.getElementById('speedValue'),
 };
 
 const ctx = els.canvas.getContext('2d');
+const wctx = els.waveformCanvas.getContext('2d');
+
+let songObjectUrl = null;
+let waveformPeaks = [];
+let isSeeking = false;
 
 let audioContext = null;
 let analyser = null;
@@ -353,18 +367,18 @@ function saveSession() {
   const durationSec = Math.round((performance.now() - sessionStart) / 1000);
   if (durationSec < 2) return;
 
-  const sessions = JSON.parse(localStorage.getItem('pitchlab_sessions') || '[]');
+  const sessions = JSON.parse(localStorage.getItem('singingcat_sessions') || '[]');
   sessions.unshift({
     date: new Date().toISOString(),
     duration: durationSec,
     minNote: sessionMinMidi !== Infinity ? midiToNoteName(sessionMinMidi) : '—',
     maxNote: sessionMaxMidi !== -Infinity ? midiToNoteName(sessionMaxMidi) : '—',
   });
-  localStorage.setItem('pitchlab_sessions', JSON.stringify(sessions.slice(0, 10)));
+  localStorage.setItem('singingcat_sessions', JSON.stringify(sessions.slice(0, 10)));
 }
 
 function renderLog() {
-  const sessions = JSON.parse(localStorage.getItem('pitchlab_sessions') || '[]');
+  const sessions = JSON.parse(localStorage.getItem('singingcat_sessions') || '[]');
   els.sessionLog.innerHTML = '';
 
   if (sessions.length === 0) {
@@ -383,8 +397,171 @@ function renderLog() {
 }
 
 function clearLog() {
-  localStorage.removeItem('pitchlab_sessions');
+  localStorage.removeItem('singingcat_sessions');
   renderLog();
+}
+
+// ---------- Song player ----------
+
+function formatTime(seconds) {
+  if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+async function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (songObjectUrl) URL.revokeObjectURL(songObjectUrl);
+  songObjectUrl = URL.createObjectURL(file);
+  els.audioPlayer.src = songObjectUrl;
+  els.songTitle.textContent = file.name;
+
+  els.playBtn.disabled = false;
+  els.seekBar.disabled = false;
+  els.speedRange.disabled = false;
+  els.playBtn.textContent = 'PLAY';
+  els.seekBar.value = 0;
+
+  waveformPeaks = [];
+  drawWaveformFrame(0);
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buffer = await tempCtx.decodeAudioData(arrayBuffer);
+    computeWaveformPeaks(buffer);
+    drawWaveformFrame(0);
+    tempCtx.close();
+  } catch (err) {
+    console.warn('Could not decode audio for waveform preview:', err);
+    // Playback still works via the <audio> element even if this fails.
+  }
+}
+
+function computeWaveformPeaks(buffer) {
+  const rect = els.waveformCanvas.getBoundingClientRect();
+  const bucketCount = Math.max(50, Math.floor(rect.width));
+  const data = buffer.getChannelData(0);
+  const blockSize = Math.floor(data.length / bucketCount);
+  const peaks = [];
+  for (let i = 0; i < bucketCount; i++) {
+    let min = 1;
+    let max = -1;
+    const start = i * blockSize;
+    for (let j = 0; j < blockSize; j++) {
+      const v = data[start + j] || 0;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    peaks.push({ min, max });
+  }
+  waveformPeaks = peaks;
+}
+
+function setupWaveformCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = els.waveformCanvas.getBoundingClientRect();
+  els.waveformCanvas.width = Math.round(rect.width * dpr);
+  els.waveformCanvas.height = Math.round(rect.height * dpr);
+  wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  if (els.audioPlayer.src) {
+    // Re-bucket peaks to match new width if we already have a song loaded.
+    // (Cheap enough to skip recompute here; just redraw with existing peaks.)
+    const progress = els.audioPlayer.duration
+      ? els.audioPlayer.currentTime / els.audioPlayer.duration
+      : 0;
+    drawWaveformFrame(progress);
+  } else {
+    drawWaveformFrame(0);
+  }
+}
+
+function drawWaveformFrame(progress) {
+  const rect = els.waveformCanvas.getBoundingClientRect();
+  const width = rect.width;
+  const height = rect.height;
+  const midY = height / 2;
+
+  wctx.clearRect(0, 0, width, height);
+
+  if (waveformPeaks.length === 0) {
+    wctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    wctx.beginPath();
+    wctx.moveTo(0, midY);
+    wctx.lineTo(width, midY);
+    wctx.stroke();
+    return;
+  }
+
+  const playedCount = Math.floor(progress * waveformPeaks.length);
+  const barWidth = width / waveformPeaks.length;
+
+  waveformPeaks.forEach((p, i) => {
+    const x = i * barWidth;
+    const yTop = midY - p.max * midY * 0.9;
+    const yBottom = midY - p.min * midY * 0.9;
+    wctx.strokeStyle = i < playedCount ? '#ffb13d' : 'rgba(57,255,160,0.35)';
+    wctx.beginPath();
+    wctx.moveTo(x, yTop);
+    wctx.lineTo(x, yBottom);
+    wctx.stroke();
+  });
+}
+
+function togglePlayback() {
+  if (!els.audioPlayer.src) return;
+  if (els.audioPlayer.paused) {
+    els.audioPlayer.play();
+    els.playBtn.textContent = 'PAUSE';
+  } else {
+    els.audioPlayer.pause();
+    els.playBtn.textContent = 'PLAY';
+  }
+}
+
+function onTimeUpdate() {
+  if (isSeeking) return;
+  const { currentTime, duration } = els.audioPlayer;
+  if (duration) {
+    els.seekBar.value = (currentTime / duration) * 100;
+    drawWaveformFrame(currentTime / duration);
+  }
+  els.timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+}
+
+function onSeekInput() {
+  isSeeking = true;
+  const { duration } = els.audioPlayer;
+  if (duration) {
+    const ratio = els.seekBar.value / 100;
+    drawWaveformFrame(ratio);
+    els.timeDisplay.textContent = `${formatTime(ratio * duration)} / ${formatTime(duration)}`;
+  }
+}
+
+function onSeekChange() {
+  const { duration } = els.audioPlayer;
+  if (duration) {
+    els.audioPlayer.currentTime = (els.seekBar.value / 100) * duration;
+  }
+  isSeeking = false;
+}
+
+function onWaveformClick(e) {
+  if (!els.audioPlayer.duration) return;
+  const rect = els.waveformCanvas.getBoundingClientRect();
+  const ratio = (e.clientX - rect.left) / rect.width;
+  els.audioPlayer.currentTime = ratio * els.audioPlayer.duration;
+}
+
+function onSpeedChange() {
+  const rate = parseFloat(els.speedRange.value);
+  els.audioPlayer.playbackRate = rate;
+  els.speedValue.textContent = `${rate.toFixed(2)}x`;
 }
 
 // ---------- Event wiring ----------
@@ -397,14 +574,31 @@ els.clearLogBtn.addEventListener('click', clearLog);
 
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && !e.repeat) {
+    // Don't hijack space while a slider is focused (arrow/space adjusts it).
+    const active = document.activeElement;
+    if (active === els.seekBar || active === els.speedRange) return;
     e.preventDefault();
     listening ? stopListening() : startListening();
   }
 });
 
-window.addEventListener('resize', setupCanvas);
+els.songFile.addEventListener('change', handleFileSelect);
+els.playBtn.addEventListener('click', togglePlayback);
+els.seekBar.addEventListener('input', onSeekInput);
+els.seekBar.addEventListener('change', onSeekChange);
+els.speedRange.addEventListener('input', onSpeedChange);
+els.waveformCanvas.addEventListener('click', onWaveformClick);
+els.audioPlayer.addEventListener('timeupdate', onTimeUpdate);
+els.audioPlayer.addEventListener('loadedmetadata', onTimeUpdate);
+els.audioPlayer.addEventListener('ended', () => { els.playBtn.textContent = 'PLAY'; });
+
+window.addEventListener('resize', () => {
+  setupCanvas();
+  setupWaveformCanvas();
+});
 
 // ---------- Init ----------
 
 setupCanvas();
+setupWaveformCanvas();
 renderLog();
