@@ -31,6 +31,7 @@
           <input type="file" id="songFile" accept="audio/*" hidden />
           <span id="songTitle" class="song-title">No song loaded</span>
         </div>
+        <p id="analysisStatus" class="analysis-status"></p>
         <canvas id="waveformCanvas"></canvas>
         <div class="player-controls">
           <button id="playBtn" class="btn-toggle" type="button" disabled>PLAY</button>
@@ -46,6 +47,10 @@
 
       <section class="panel panel-scope">
         <div class="panel-label">PITCH MONITOR</div>
+        <div class="legend">
+          <span class="legend-item"><span class="dot dot-mic"></span>you</span>
+          <span class="legend-item"><span class="dot dot-ref"></span>song target</span>
+        </div>
         <canvas id="pitchCanvas"></canvas>
         <div class="scope-footer">
           <span id="statusText" class="status">STANDBY</span>
