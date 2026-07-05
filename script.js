@@ -1,4 +1,4 @@
-// ---------- Pitch Lab — Phase 1: Live Mic Pitch Tracker ----------
+// ---------- Singing Cat — Phase 3: Reference Pitch Overlay ----------
 
 const NOTE_STRINGS = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const MIDI_MIN = 40;   // E2 — low end of typical vocal range
@@ -6,6 +6,8 @@ const MIDI_MAX = 84;   // C6 — high end of typical vocal range
 const WINDOW_MS = 8000; // how many ms of trace history to show at once
 const MIN_FREQ = 60;    // ignore anything below this (rumble, not voice)
 const MAX_FREQ = 1200;  // ignore anything above this (noise, not voice)
+const REF_WINDOW = 1024;  // samples per analysis frame when scanning the song
+const REF_HOP_SEC = 0.08; // seconds between analysis frames (~80ms)
 
 const els = {
   canvas: document.getElementById('pitchCanvas'),
@@ -21,6 +23,7 @@ const els = {
   audioPlayer: document.getElementById('audioPlayer'),
   songFile: document.getElementById('songFile'),
   songTitle: document.getElementById('songTitle'),
+  analysisStatus: document.getElementById('analysisStatus'),
   waveformCanvas: document.getElementById('waveformCanvas'),
   playBtn: document.getElementById('playBtn'),
   seekBar: document.getElementById('seekBar'),
@@ -34,6 +37,7 @@ const wctx = els.waveformCanvas.getContext('2d');
 
 let songObjectUrl = null;
 let waveformPeaks = [];
+let referencePitch = [];  // { t: songTimeMs, midi } — precomputed from the uploaded song
 let isSeeking = false;
 
 let audioContext = null;
@@ -43,10 +47,11 @@ let dataArray = null;
 let rafId = null;
 let listening = false;
 
-let pitchHistory = [];       // { t: performanceNowMs, midi: number }
+let pitchHistory = [];       // { t: timelineMs, midi: number }
 let sessionStart = null;
 let sessionMinMidi = Infinity;
 let sessionMaxMidi = -Infinity;
+let lastRenderNow = 0;
 
 // ---------- Note / frequency math ----------
 
@@ -134,6 +139,15 @@ function autoCorrelate(buffer, sampleRate) {
   return { freq, rms };
 }
 
+// ---------- Shared timeline ----------
+// When a song is loaded, both the mic trace and the reference trace are keyed
+// to the song's own currentTime, so they line up. With no song loaded, the
+// mic trace falls back to wall-clock time (plain practice mode).
+
+function getTimelineMs() {
+  return els.audioPlayer.src ? els.audioPlayer.currentTime * 1000 : performance.now();
+}
+
 // ---------- Canvas setup ----------
 
 function setupCanvas() {
@@ -151,7 +165,7 @@ function midiToY(midi, height) {
   return height - ratio * height;
 }
 
-function renderCanvas(widthOverride, heightOverride) {
+function renderCanvas(widthOverride, heightOverride, nowOverride) {
   const rect = els.canvas.getBoundingClientRect();
   const width = widthOverride || rect.width;
   const height = heightOverride || rect.height;
@@ -179,10 +193,32 @@ function renderCanvas(widthOverride, heightOverride) {
     }
   }
 
-  if (pitchHistory.length < 2) return;
-
-  const now = pitchHistory[pitchHistory.length - 1].t;
+  const now = nowOverride != null ? nowOverride : lastRenderNow;
   const cutoff = now - WINDOW_MS;
+
+  // Reference pitch trace (the song's own melody), drawn first so the mic
+  // trace sits visibly on top of it.
+  if (els.audioPlayer.src && referencePitch.length > 1) {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(79,195,255,0.6)';
+    ctx.shadowColor = 'rgba(79,195,255,0.35)';
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    let started = false;
+    let lastPoint = null;
+    for (const point of referencePitch) {
+      if (point.t < cutoff || point.t > now) continue;
+      const x = width - ((now - point.t) / WINDOW_MS) * width;
+      const y = midiToY(point.midi, height);
+      if (lastPoint && point.t - lastPoint.t > 160) started = false;
+      if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+      lastPoint = point;
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  if (pitchHistory.length < 2) return;
 
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#39ffa0';
@@ -309,6 +345,7 @@ async function startListening() {
   sessionMinMidi = Infinity;
   sessionMaxMidi = -Infinity;
   pitchHistory = [];
+  lastRenderNow = getTimelineMs();
 
   els.toggleBtn.textContent = 'STOP';
   els.toggleBtn.classList.add('active');
@@ -342,12 +379,17 @@ function tick() {
 
   els.meterFill.style.width = `${Math.min(rms * 300, 100)}%`;
 
+  const now = getTimelineMs();
+  const songLoadedAndPaused = els.audioPlayer.src && els.audioPlayer.paused;
+
   if (freq > MIN_FREQ && freq < MAX_FREQ) {
     const midi = freqToMidi(freq);
-    const now = performance.now();
-    pitchHistory.push({ t: now, midi });
-    const cutoff = now - WINDOW_MS;
-    pitchHistory = pitchHistory.filter((p) => p.t >= cutoff);
+
+    if (!songLoadedAndPaused) {
+      pitchHistory.push({ t: now, midi });
+      const cutoff = now - WINDOW_MS;
+      pitchHistory = pitchHistory.filter((p) => p.t >= cutoff);
+    }
 
     sessionMinMidi = Math.min(sessionMinMidi, midi);
     sessionMaxMidi = Math.max(sessionMaxMidi, midi);
@@ -357,7 +399,8 @@ function tick() {
     updateReadout(null, null);
   }
 
-  renderCanvas();
+  lastRenderNow = now;
+  renderCanvas(undefined, undefined, now);
 }
 
 // ---------- Session log (localStorage) ----------
@@ -401,6 +444,36 @@ function clearLog() {
   renderLog();
 }
 
+async function analyzeSongPitch(buffer) {
+  referencePitch = [];
+  const data = buffer.getChannelData(0);
+  const sampleRate = buffer.sampleRate;
+  const hopSize = Math.round(sampleRate * REF_HOP_SEC);
+  const totalFrames = Math.floor((data.length - REF_WINDOW) / hopSize);
+  if (totalFrames <= 0) return;
+
+  const BATCH = 25; // frames per batch before yielding back to the browser
+  els.analysisStatus.textContent = 'ANALYZING PITCH… 0%';
+
+  for (let f = 0; f < totalFrames; f++) {
+    const start = f * hopSize;
+    const frame = data.subarray(start, start + REF_WINDOW);
+    const { freq, rms } = autoCorrelate(frame, sampleRate);
+    if (freq > MIN_FREQ && freq < MAX_FREQ && rms > 0.01) {
+      const midi = freqToMidi(freq);
+      referencePitch.push({ t: (start / sampleRate) * 1000, midi });
+    }
+    if (f % BATCH === 0) {
+      els.analysisStatus.textContent = `ANALYZING PITCH… ${Math.round((f / totalFrames) * 100)}%`;
+      renderCanvas(undefined, undefined, lastRenderNow); // keep any playing trace live while we work
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+
+  els.analysisStatus.textContent = `Reference pitch ready — ${referencePitch.length} points`;
+  setTimeout(() => { els.analysisStatus.textContent = ''; }, 2500);
+}
+
 // ---------- Song player ----------
 
 function formatTime(seconds) {
@@ -426,6 +499,8 @@ async function handleFileSelect(e) {
   els.seekBar.value = 0;
 
   waveformPeaks = [];
+  referencePitch = [];
+  pitchHistory = [];
   drawWaveformFrame(0);
 
   try {
@@ -435,8 +510,10 @@ async function handleFileSelect(e) {
     computeWaveformPeaks(buffer);
     drawWaveformFrame(0);
     tempCtx.close();
+    await analyzeSongPitch(buffer);
   } catch (err) {
-    console.warn('Could not decode audio for waveform preview:', err);
+    console.warn('Could not decode/analyze audio:', err);
+    els.analysisStatus.textContent = 'Could not analyze this file — playback will still work.';
     // Playback still works via the <audio> element even if this fails.
   }
 }
@@ -531,6 +608,11 @@ function onTimeUpdate() {
     drawWaveformFrame(currentTime / duration);
   }
   els.timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+
+  if (!listening) {
+    lastRenderNow = getTimelineMs();
+    renderCanvas(undefined, undefined, lastRenderNow);
+  }
 }
 
 function onSeekInput() {
