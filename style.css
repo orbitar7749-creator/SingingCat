@@ -278,6 +278,89 @@ input[type="range"]:focus-visible {
   min-height: 1em;
 }
 
+.match-readout {
+  text-align: center;
+}
+
+.match-percent {
+  font-family: var(--mono);
+  font-size: 2.2rem;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.match-percent.match-good { color: var(--phosphor); text-shadow: 0 0 12px var(--phosphor-dim); }
+.match-percent.match-ok { color: var(--amber); }
+.match-percent.match-bad { color: var(--danger); }
+
+.match-label {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  margin: 8px 0 0;
+}
+
+/* Report card modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 7, 10, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 340px;
+  width: 100%;
+  text-align: center;
+}
+
+.report-grid {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 18px 0 22px;
+}
+
+.report-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-value {
+  font-family: var(--mono);
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--phosphor);
+  text-shadow: 0 0 8px var(--phosphor-dim);
+}
+
+.report-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
 /* Scope panel */
 .panel-scope canvas {
   width: 100%;
