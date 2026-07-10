@@ -30,6 +30,13 @@ const els = {
   timeDisplay: document.getElementById('timeDisplay'),
   speedRange: document.getElementById('speedRange'),
   speedValue: document.getElementById('speedValue'),
+  matchPercent: document.getElementById('matchPercent'),
+  matchLabel: document.getElementById('matchLabel'),
+  reportModal: document.getElementById('reportModal'),
+  reportAccuracy: document.getElementById('reportAccuracy'),
+  reportRange: document.getElementById('reportRange'),
+  reportDuration: document.getElementById('reportDuration'),
+  closeReportBtn: document.getElementById('closeReportBtn'),
 };
 
 const ctx = els.canvas.getContext('2d');
@@ -38,6 +45,7 @@ const wctx = els.waveformCanvas.getContext('2d');
 let songObjectUrl = null;
 let waveformPeaks = [];
 let referencePitch = [];  // { t: songTimeMs, midi } — precomputed from the uploaded song
+let accuracyHistory = []; // { t: timelineMs, accuracy: 0-100 } — collected while singing along
 let isSeeking = false;
 
 let audioContext = null;
@@ -148,6 +156,48 @@ function getTimelineMs() {
   return els.audioPlayer.src ? els.audioPlayer.currentTime * 1000 : performance.now();
 }
 
+// ---------- Scoring: how close is the mic pitch to the song's target? ----------
+
+function findNearestReference(tMs) {
+  if (referencePitch.length === 0) return null;
+  let lo = 0;
+  let hi = referencePitch.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (referencePitch[mid].t < tMs) lo = mid + 1; else hi = mid;
+  }
+  let best = referencePitch[lo];
+  if (lo > 0 && Math.abs(referencePitch[lo - 1].t - tMs) < Math.abs(best.t - tMs)) {
+    best = referencePitch[lo - 1];
+  }
+  if (Math.abs(best.t - tMs) > 180) return null; // no reference close enough in time
+  return best;
+}
+
+function accuracyFromMidiDiff(micMidi, refMidi) {
+  const cents = (micMidi - refMidi) * 100;
+  return Math.max(0, 100 - Math.abs(cents));
+}
+
+function accuracyTier(accuracy) {
+  if (accuracy >= 85) return 'good';
+  if (accuracy >= 60) return 'ok';
+  return 'bad';
+}
+
+function updateMatchReadout(accuracy) {
+  if (accuracy == null) {
+    els.matchPercent.textContent = '—';
+    els.matchPercent.className = 'match-percent';
+    els.matchLabel.textContent = els.audioPlayer.src ? 'no target nearby' : 'load a song to compare';
+    return;
+  }
+  const tier = accuracyTier(accuracy);
+  els.matchPercent.textContent = `${Math.round(accuracy)}%`;
+  els.matchPercent.className = `match-percent match-${tier}`;
+  els.matchLabel.textContent = tier === 'good' ? 'ON PITCH' : tier === 'ok' ? 'CLOSE' : 'OFF PITCH';
+}
+
 // ---------- Canvas setup ----------
 
 function setupCanvas() {
@@ -249,12 +299,26 @@ function renderCanvas(widthOverride, heightOverride, nowOverride) {
   ctx.stroke();
   ctx.shadowBlur = 0;
 
-  // Highlight dot at the most recent point
+  // Highlight dot at the most recent point — colored by accuracy vs. the
+  // song target when one is available, otherwise a plain amber marker.
   const last = pitchHistory[pitchHistory.length - 1];
   const lx = width - ((now - last.t) / WINDOW_MS) * width;
   const ly = midiToY(last.midi, height);
-  ctx.fillStyle = '#ffb13d';
-  ctx.shadowColor = 'rgba(255,177,61,0.8)';
+
+  let dotColor = '#ffb13d';
+  let dotGlow = 'rgba(255,177,61,0.8)';
+  if (els.audioPlayer.src) {
+    const ref = findNearestReference(last.t);
+    if (ref) {
+      const tier = accuracyTier(accuracyFromMidiDiff(last.midi, ref.midi));
+      if (tier === 'good') { dotColor = '#39ffa0'; dotGlow = 'rgba(57,255,160,0.8)'; }
+      else if (tier === 'ok') { dotColor = '#ffb13d'; dotGlow = 'rgba(255,177,61,0.8)'; }
+      else { dotColor = '#ff5470'; dotGlow = 'rgba(255,84,112,0.8)'; }
+    }
+  }
+
+  ctx.fillStyle = dotColor;
+  ctx.shadowColor = dotGlow;
   ctx.shadowBlur = 6;
   ctx.beginPath();
   ctx.arc(lx, ly, 3.5, 0, Math.PI * 2);
@@ -395,8 +459,18 @@ function tick() {
     sessionMaxMidi = Math.max(sessionMaxMidi, midi);
 
     updateReadout(freq, midi);
+
+    const ref = els.audioPlayer.src ? findNearestReference(now) : null;
+    if (ref) {
+      const accuracy = accuracyFromMidiDiff(midi, ref.midi);
+      accuracyHistory.push({ t: now, accuracy });
+      updateMatchReadout(accuracy);
+    } else {
+      updateMatchReadout(null);
+    }
   } else {
     updateReadout(null, null);
+    updateMatchReadout(null);
   }
 
   lastRenderNow = now;
@@ -501,6 +575,7 @@ async function handleFileSelect(e) {
   waveformPeaks = [];
   referencePitch = [];
   pitchHistory = [];
+  accuracyHistory = [];
   drawWaveformFrame(0);
 
   try {
@@ -646,6 +721,27 @@ function onSpeedChange() {
   els.speedValue.textContent = `${rate.toFixed(2)}x`;
 }
 
+// ---------- Report card ----------
+
+function showReportCard() {
+  if (accuracyHistory.length === 0) return; // nothing to report if no one sang along
+
+  const avg = accuracyHistory.reduce((sum, p) => sum + p.accuracy, 0) / accuracyHistory.length;
+  els.reportAccuracy.textContent = `${Math.round(avg)}%`;
+
+  const rangeText = sessionMinMidi !== Infinity && sessionMaxMidi !== -Infinity
+    ? `${midiToNoteName(sessionMinMidi)}–${midiToNoteName(sessionMaxMidi)}`
+    : '—';
+  els.reportRange.textContent = rangeText;
+  els.reportDuration.textContent = formatTime(els.audioPlayer.duration);
+
+  els.reportModal.classList.remove('hidden');
+}
+
+function hideReportCard() {
+  els.reportModal.classList.add('hidden');
+}
+
 // ---------- Event wiring ----------
 
 els.toggleBtn.addEventListener('click', () => {
@@ -672,7 +768,11 @@ els.speedRange.addEventListener('input', onSpeedChange);
 els.waveformCanvas.addEventListener('click', onWaveformClick);
 els.audioPlayer.addEventListener('timeupdate', onTimeUpdate);
 els.audioPlayer.addEventListener('loadedmetadata', onTimeUpdate);
-els.audioPlayer.addEventListener('ended', () => { els.playBtn.textContent = 'PLAY'; });
+els.audioPlayer.addEventListener('ended', () => {
+  els.playBtn.textContent = 'PLAY';
+  showReportCard();
+});
+els.closeReportBtn.addEventListener('click', hideReportCard);
 
 window.addEventListener('resize', () => {
   setupCanvas();
