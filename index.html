@@ -70,6 +70,14 @@
           </div>
         </section>
 
+        <section class="panel panel-match">
+          <div class="panel-label">MATCH</div>
+          <div class="match-readout">
+            <span id="matchPercent" class="match-percent">—</span>
+          </div>
+          <p id="matchLabel" class="match-label">load a song to compare</p>
+        </section>
+
         <section class="panel panel-input">
           <div class="panel-label">MIC INPUT</div>
           <div class="meter" aria-hidden="true">
@@ -90,8 +98,29 @@
     </main>
 
     <footer class="app-footer">
-      <p>Phase 1 — Live Mic Pitch Tracker · requires microphone access (HTTPS or localhost)</p>
+      <p>Phase 3 — Reference Pitch + Scoring · requires microphone access (HTTPS or localhost)</p>
     </footer>
+  </div>
+
+  <div id="reportModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Session report card">
+    <div class="modal-content">
+      <div class="panel-label">REPORT CARD</div>
+      <div class="report-grid">
+        <div class="report-stat">
+          <span id="reportAccuracy" class="report-value">—</span>
+          <span class="report-label">avg accuracy</span>
+        </div>
+        <div class="report-stat">
+          <span id="reportRange" class="report-value">—</span>
+          <span class="report-label">vocal range</span>
+        </div>
+        <div class="report-stat">
+          <span id="reportDuration" class="report-value">—</span>
+          <span class="report-label">song length</span>
+        </div>
+      </div>
+      <button id="closeReportBtn" class="btn-toggle" type="button">CLOSE</button>
+    </div>
   </div>
 
   <script src="script.js"></script>
